@@ -45,4 +45,4 @@ async function checkJobs() {
 checkJobs();
 
 // every 5 mins
-setInterval(checkJobs, 30 * 1000);
+setInterval(checkJobs, 5 * 60 * 1000);
