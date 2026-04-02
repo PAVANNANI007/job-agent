@@ -5,9 +5,7 @@ const { sendTelegramBatch } = require('./services/telegram.service');
 const { log } = require('./utils/logger');
 
 const SEARCHES = [
-  'react developer',
-  'node js developer',
-  'full stack developer',
+  'javascript'
 ];
 
 async function checkJobs() {
@@ -19,7 +17,8 @@ async function checkJobs() {
   for (const search of SEARCHES) {
     const jobs = await fetchJobs(search);
     const processed = processJobs(jobs);
-
+    console.log('pr', processed);
+    
     for (const job of processed) {
       if (!isNewJob(job)) continue;
 
@@ -45,4 +44,4 @@ async function checkJobs() {
 checkJobs();
 
 // every 5 mins
-setInterval(checkJobs, 5 * 60 * 1000);
+setInterval(checkJobs, 30 * 1000);

@@ -1,49 +1,103 @@
 const { chromium } = require('playwright');
 
-async function fetchJobs(search) {
+const MAX_PAGES = 4; // safe limit
+
+async function fetchJobs(search, processJobCallback) {
   const browser = await chromium.launch({
-    headless: true, // safe now
+    headless: false, // keep false for stability
   });
 
   const page = await browser.newPage();
 
-  const url = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(search)}&location=India&f_TPR=r300`;
+  const url = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(search)}&location=India&f_TPR=r86400`;
 
-  try {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-    // wait for job cards (public page)
-    await page.waitForSelector('.base-card', { timeout: 15000 });
+  // wait for job list
+  await page.waitForSelector('.job-card-container', { timeout: 15000 });
 
-    // scroll to load more jobs
-    await page.mouse.wheel(0, 3000);
-    await page.waitForTimeout(3000);
+  let totalProcessed = 0;
 
-    const jobs = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('.base-card')).map(job => {
-        const title =
-          job.querySelector('.base-search-card__title')?.innerText?.trim();
+  for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
+    console.log(`📄 Page ${pageNum}`);
 
-        const company =
-          job.querySelector('.base-search-card__subtitle')?.innerText?.trim();
+    // scroll job list
+    await page.mouse.wheel(0, 4000);
+    await page.waitForTimeout(2000);
 
-        const link =
-          job.querySelector('a.base-card__full-link')?.href;
+    const jobCards = await page.$$('.job-card-container');
 
-        return { title, company, link, description: '' };
-      });
-    });
+    console.log(`🔍 Jobs on page: ${jobCards.length}`);
 
-    console.log(`✅ Jobs found for "${search}":`, jobs.length);
+    for (let i = 0; i < jobCards.length; i++) {
+      try {
+        const jobCard = jobCards[i];
 
-    return jobs.filter(j => j.title && j.company);
+        // ensure visible
+        await jobCard.scrollIntoViewIfNeeded();
 
-  } catch (err) {
-    console.log("❌ Scraping error:", err.message);
-    return [];
-  } finally {
-    await browser.close();
+        // click job
+        await jobCard.click();
+
+        // wait for right panel
+        await page.waitForSelector('#job-details', { timeout: 5000 });
+
+        // human delay
+        await page.waitForTimeout(1200 + Math.random() * 1000);
+
+        const job = await page.evaluate(() => {
+          const title =
+            document.querySelector('.job-details-jobs-unified-top-card__job-title')
+              ?.innerText?.trim();
+
+          const company =
+            document.querySelector('.job-details-jobs-unified-top-card__company-name')
+              ?.innerText?.trim();
+
+          const description =
+            document.querySelector('#job-details')
+              ?.innerText?.trim() || '';
+
+          const link = window.location.href;
+
+          return { title, company, description, link };
+        });
+
+        if (!job?.title || !job?.company) continue;
+
+        totalProcessed++;
+
+        // 🔥 process immediately (score + filter + notify)
+        await processJobCallback(job);
+
+        // anti-bot delay
+        await page.waitForTimeout(1000 + Math.random() * 1000);
+
+      } catch (err) {
+        console.log("⚠️ Job error:", err.message);
+        continue;
+      }
+    }
+
+    // 👉 pagination NEXT button (from your DOM)
+    const nextButton = await page.$('.jobs-search-pagination__button--next');
+
+    if (!nextButton) {
+      console.log("⛔ No more pages");
+      break;
+    }
+
+    console.log("➡️ Moving to next page");
+
+    await nextButton.click();
+
+    // wait for new page content
+    await page.waitForTimeout(4000);
   }
+
+  console.log(`✅ Total jobs processed: ${totalProcessed}`);
+
+  await browser.close();
 }
 
 module.exports = { fetchJobs };
