@@ -1,17 +1,15 @@
 const axios = require('axios');
 const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID } = require('../config/env');
 
-async function sendTelegramBatch(jobs) {
-  const message = jobs.slice(0, 10).map((job, i) =>
-    `${i+1}. ${job.title} (${job.score}%)\n${job.company}\n${job.link}`
-  ).join('\n\n');
+async function sendTelegram(job) {
+  const msg = `🚀 ${job.title} (${job.score}%)
+${job.company}
+${job.link}`;
 
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-  await axios.post(url, {
-    chat_id: TELEGRAM_CHAT_ID,
-    text: `🚀 Job Updates\n\n${message}`,
-  });
+  await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+    { chat_id: TELEGRAM_CHAT_ID, text: msg }
+  );
 }
 
-module.exports = { sendTelegramBatch };
+module.exports = { sendTelegram };

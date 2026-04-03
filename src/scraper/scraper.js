@@ -1,101 +1,110 @@
 const { chromium } = require('playwright');
 
-const MAX_PAGES = 4; // safe limit
-
 async function fetchJobs(search, processJobCallback) {
   const browser = await chromium.launch({
-    headless: false, // keep false for stability
+    headless: true,
   });
 
   const page = await browser.newPage();
 
-  const url = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(search)}&location=India&f_TPR=r86400`;
+  const url = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(
+    search
+  )}&location=India&f_TPR=r86400`;
+
+  console.log("🌐 Opening:", url);
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-  // wait for job list
-  await page.waitForSelector('.job-card-container', { timeout: 15000 });
+  // wait for public job cards
+  await page.waitForSelector('.base-card', { timeout: 15000 });
 
-  let totalProcessed = 0;
+  // scroll to load more jobs
+  await page.mouse.wheel(0, 3000);
+  await page.waitForTimeout(3000);
 
-  for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
-    console.log(`📄 Page ${pageNum}`);
+  // 🔥 EXTRACT JOB LIST (WITH CLEAN LINKS)
+  const jobs = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('.base-card')).map(job => {
+      const title =
+        job.querySelector('.base-search-card__title')?.innerText?.trim();
 
-    // scroll job list
-    await page.mouse.wheel(0, 4000);
-    await page.waitForTimeout(2000);
+      const company =
+        job.querySelector('.base-search-card__subtitle')?.innerText?.trim();
 
-    const jobCards = await page.$$('.job-card-container');
+      const rawLink =
+        job.querySelector('a.base-card__full-link')?.href || '';
 
-    console.log(`🔍 Jobs on page: ${jobCards.length}`);
+      // 🔥 Extract job ID and clean link
+      const match = rawLink.match(/jobs\/view\/(\d+)/);
 
-    for (let i = 0; i < jobCards.length; i++) {
+      const cleanLink = match
+        ? `https://www.linkedin.com/jobs/view/${match[1]}`
+        : rawLink;
+
+      return {
+        title,
+        company,
+        link: cleanLink,
+      };
+    });
+  });
+
+  console.log(`✅ Found ${jobs.length} jobs`);
+
+  // 🔥 PROCESS EACH JOB
+  for (const job of jobs.slice(0, 10)) {
+    try {
+      const detailPage = await browser.newPage();
+
+      await detailPage.goto(job.link, {
+        waitUntil: 'domcontentloaded',
+      });
+
+      // wait for page
+      await detailPage.waitForTimeout(3000);
+
+      // 🔥 Click "Show more" if exists
       try {
-        const jobCard = jobCards[i];
+        const showMoreBtn = await detailPage.$(
+          'button[aria-label="Show more description"]'
+        );
+        if (showMoreBtn) {
+          await showMoreBtn.click();
+          await detailPage.waitForTimeout(1000);
+        }
+      } catch {}
 
-        // ensure visible
-        await jobCard.scrollIntoViewIfNeeded();
+      // 🔥 Extract ONLY description section
+      const description = await detailPage.evaluate(() => {
+        const desc = document.querySelector(
+          '.show-more-less-html__markup'
+        );
 
-        // click job
-        await jobCard.click();
+        if (!desc) return '';
 
-        // wait for right panel
-        await page.waitForSelector('#job-details', { timeout: 5000 });
+        let text = desc.innerText;
 
-        // human delay
-        await page.waitForTimeout(1200 + Math.random() * 1000);
+        // clean extra spaces
+        text = text.replace(/\s+/g, ' ').trim();
 
-        const job = await page.evaluate(() => {
-          const title =
-            document.querySelector('.job-details-jobs-unified-top-card__job-title')
-              ?.innerText?.trim();
+        return text;
+      });
 
-          const company =
-            document.querySelector('.job-details-jobs-unified-top-card__company-name')
-              ?.innerText?.trim();
+      await detailPage.close();
 
-          const description =
-            document.querySelector('#job-details')
-              ?.innerText?.trim() || '';
+      // 🔥 SEND CLEAN DATA
+      await processJobCallback({
+        ...job,
+        description,
+      });
 
-          const link = window.location.href;
+      // anti-bot delay
+      await page.waitForTimeout(1200 + Math.random() * 1000);
 
-          return { title, company, description, link };
-        });
-
-        if (!job?.title || !job?.company) continue;
-
-        totalProcessed++;
-
-        // 🔥 process immediately (score + filter + notify)
-        await processJobCallback(job);
-
-        // anti-bot delay
-        await page.waitForTimeout(1000 + Math.random() * 1000);
-
-      } catch (err) {
-        console.log("⚠️ Job error:", err.message);
-        continue;
-      }
+    } catch (err) {
+      console.log("⚠️ Error:", err.message);
     }
-
-    // 👉 pagination NEXT button (from your DOM)
-    const nextButton = await page.$('.jobs-search-pagination__button--next');
-
-    if (!nextButton) {
-      console.log("⛔ No more pages");
-      break;
-    }
-
-    console.log("➡️ Moving to next page");
-
-    await nextButton.click();
-
-    // wait for new page content
-    await page.waitForTimeout(4000);
   }
-
-  console.log(`✅ Total jobs processed: ${totalProcessed}`);
 
   await browser.close();
 }

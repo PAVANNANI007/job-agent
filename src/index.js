@@ -1,47 +1,27 @@
 const { fetchJobs } = require('./scraper/scraper');
-const { processJobs, isNewJob } = require('./services/job.service');
-const { sendWhatsAppBatch } = require('./services/whatsapp.service');
-const { sendTelegramBatch } = require('./services/telegram.service');
-const { log } = require('./utils/logger');
+const { processJobs } = require('./services/job.service');
+const { sendTelegram } = require('./services/telegram.service');
+const { sendWhatsApp } = require('./services/whatsapp.service');
 
-const SEARCHES = [
-  'javascript'
-];
+async function processJob(job) {
+  const processed = processJobs([job]);
+  if (!processed.length) return;
 
-async function checkJobs() {
-  log('🔍 Checking jobs...');
+  const finalJob = processed[0];
 
-  const whatsappJobs = [];
-  const telegramJobs = [];
-
-  for (const search of SEARCHES) {
-    const jobs = await fetchJobs(search);
-    const processed = processJobs(jobs);
-    console.log('pr', processed);
-    
-    for (const job of processed) {
-      if (!isNewJob(job)) continue;
-
-      if (job.score >= 90 && job.isTarget) {
-        whatsappJobs.push(job);
-      } else if (job.score >= 55) {
-        telegramJobs.push(job);
-      }
-    }
-  }
-  if (whatsappJobs.length > 0) {
-    await sendWhatsAppBatch(whatsappJobs);
-    log(`🔥 WhatsApp sent (${whatsappJobs.length})`);
-  }
-
-  if (telegramJobs.length > 0) {
-    await sendTelegramBatch(telegramJobs);
-    log(`📩 Telegram sent (${telegramJobs.length})`);
+  console.log(`✅ ${finalJob.title} (${finalJob.score}%)`);
+  
+  if (finalJob.score >= 90 && finalJob.isTarget) {
+    await sendWhatsApp(finalJob);
+  } else {
+    await sendTelegram(finalJob);
   }
 }
 
-// run immediately
-checkJobs();
+async function checkJobs() {
+  console.log("🔍 Checking jobs...");
+  await fetchJobs('javascript developer', processJob);
+}
 
-// every 5 mins
-setInterval(checkJobs, 30 * 1000);
+checkJobs();
+setInterval(checkJobs, 5 * 60 * 1000);
